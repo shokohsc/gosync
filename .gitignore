@@ -1,0 +1,12 @@
+gosync
+gosync.exe
+coverage.out
+
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+*.pem
+*.key
