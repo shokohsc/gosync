@@ -13,12 +13,12 @@ import (
 )
 
 type Config struct {
-	Port          string
-	Dir           string
-	Proxy         string
-	ProxyTimeout  time.Duration
-	TLSCert       string
-	TLSKey        string
+	Port      string
+	Dir       string
+	Proxy     string
+	TLSCert   string
+	TLSKey    string
+	ProxyOpts proxy.Options
 }
 
 type Server struct {
@@ -34,9 +34,7 @@ func (s *Server) Start() error {
 	var handler http.Handler
 
 	if s.config.Proxy != "" {
-		proxyHandler, err := proxy.NewWithOptions(s.config.Proxy, proxy.Options{
-			Timeout: s.config.ProxyTimeout,
-		})
+		proxyHandler, err := proxy.NewWithOptions(s.config.Proxy, s.config.ProxyOpts)
 		if err != nil {
 			return err
 		}

@@ -1,11 +1,18 @@
 port: "3001"
 dir: "."
-proxy: ""
-watch:
-  - "."
+proxy: "http://localhost:5173"
+
+# Proxy features (BrowserSync-compatible)
+proxy_timeout_seconds: 30
+proxy_change_origin: true
+proxy_auto_rewrite: true
+proxy_strip_cookies: true
+proxy_rewrite_links: true
+proxy_insecure: false
+
+# TLS
 tls_cert: ""
 tls_key: ""
-proxy_timeout_seconds: 30
 
 hub_options:
   rate_limit_conns: 100

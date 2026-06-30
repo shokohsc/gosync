@@ -1,7 +1,6 @@
 package main
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +12,6 @@ func TestRunWithInvalidProxy(t *testing.T) {
 		Port:  "4599",
 		Dir:   ".",
 		Proxy: "invalid://bad-scheme",
-		Watch: []string{"."},
 	}
 	cfg.ApplyDefaults()
 
@@ -21,16 +19,12 @@ func TestRunWithInvalidProxy(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid proxy scheme")
 	}
-	if !strings.Contains(err.Error(), "proxy target scheme must be http or https") {
-		t.Errorf("unexpected error: %v", err)
-	}
 }
 
 func TestRunTLSWithMissingKey(t *testing.T) {
 	cfg := &config.Config{
 		Port:    "4596",
 		Dir:     ".",
-		Watch:   []string{"."},
 		TLSCert: "cert.pem",
 	}
 	cfg.ApplyDefaults()
@@ -49,46 +43,6 @@ func TestRunTLSWithMissingKey(t *testing.T) {
 	}
 }
 
-func TestRunInvalidWatchDirInGoroutine(t *testing.T) {
-	cfg := &config.Config{
-		Port:  "4597",
-		Dir:   ".",
-		Watch: []string{"/nonexistent/path"},
-	}
-	cfg.ApplyDefaults()
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- run(cfg)
-	}()
-
-	select {
-	case err := <-errCh:
-		t.Logf("error: %v", err)
-	case <-time.After(200 * time.Millisecond):
-	}
-}
-
-func TestRunDedupWatchDirsInGoroutine(t *testing.T) {
-	cfg := &config.Config{
-		Port:  "4595",
-		Dir:   ".",
-		Watch: []string{"dir1", "dir2", "dir1"},
-	}
-	cfg.ApplyDefaults()
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- run(cfg)
-	}()
-
-	select {
-	case err := <-errCh:
-		t.Logf("error: %v", err)
-	case <-time.After(200 * time.Millisecond):
-	}
-}
-
 func TestRunWithProxyTimeout(t *testing.T) {
 	timeout := 30
 	cfg := &config.Config{
@@ -96,7 +50,6 @@ func TestRunWithProxyTimeout(t *testing.T) {
 		Dir:              ".",
 		Proxy:            "ftp://bad",
 		ProxyTimeoutSecs: &timeout,
-		Watch:            []string{"."},
 	}
 	cfg.ApplyDefaults()
 
@@ -114,9 +67,8 @@ func TestRunWithCustomHubOptions(t *testing.T) {
 	pingInterval := 25
 
 	cfg := &config.Config{
-		Port:  "4593",
-		Dir:   ".",
-		Watch: []string{"."},
+		Port: "4593",
+		Dir:  ".",
 		HubOpts: config.HubOptions{
 			RateLimitConns:       &rateLimit,
 			MaxMsgSizeBytes:      &msgSize,

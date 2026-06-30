@@ -1,27 +1,30 @@
 # gosync
 
-A fast, lightweight BrowserSync clone written in Go. Watches files and synchronizes changes to browser tabs in real-time via WebSocket.
+A fast, lightweight BrowserSync clone written in Go. Uses a reverse proxy and WebSocket to synchronize browser tabs in real-time.
 
 ## Features
 
-- **Static file server** — serve a directory of files
-- **Reverse proxy** — proxy to an upstream dev server (Vite, React, etc.)
-- **Live reload** — full page reload on HTML/JS file changes
+- **Static file server** — serve a directory of files directly
+- **Reverse proxy** — proxy to an upstream dev server (Vite, React, etc.) with BrowserSync-compatible features
+- **Proxy — changeOrigin** — rewrite the `Host` header to match the upstream target
+- **Proxy — autoRewrite** — rewrite `Location` headers in 3xx redirects so they point to the proxy host
+- **Proxy — cookieDomainRewrite** — strip `Domain` from `Set-Cookie` headers to prevent cookie scope mismatch
+- **Proxy — rewriteLinks** — replace the target host with the proxy host inside HTML response bodies
+- **Proxy — custom headers** — inject custom request headers to upstream targets
+- **Proxy — insecure TLS** — skip upstream TLS certificate verification (opt-in)
+- **Proxy — configurable timeout** — set a response header timeout for upstream requests
 - **CSS injection** — hot-swap stylesheets without a full reload
-- **File watching** — recursive directory watching with debounce
 - **WebSocket sync** — real-time events pushed to all connected browsers
 - **Scroll sync** — synchronized scrolling across browser tabs
 - **TLS support** — optional HTTPS/WSS with modern cipher suites
 - **Config file** — YAML-based configuration (`.gosync.yaml`)
 - **Environment variable overrides** — all options configurable via env vars
 - **Configurable WebSocket hub** — tune rate limits, message sizes, timeouts
-- **Proxy timeout** — configurable response header timeout
 - **Docker support** — multi-arch (amd64/arm64) scratch-based container images
 
 ## Dependencies
 
 - [gorilla/websocket](https://github.com/gorilla/websocket) — WebSocket hub
-- [fsnotify/fsnotify](https://github.com/fsnotify/fsnotify) — file system watcher
 - [gopkg.in/yaml.v3](https://gopkg.in/yaml.v3) — YAML config parsing
 
 ## Installation
@@ -43,13 +46,13 @@ CGO_ENABLED=0 go build -o gosync ./cmd/gosync
 ### Serve static files
 
 ```bash
-gosync --port 3001 --dir ./public --watch ./public
+gosync --port 3001 --dir ./public
 ```
 
 ### Proxy to a dev server
 
 ```bash
-gosync --port 3001 --proxy http://localhost:5173 --watch ./src
+gosync --port 3001 --proxy http://localhost:5173
 ```
 
 ### Enable HTTPS
@@ -65,7 +68,6 @@ gosync --port 443 --tls-cert ./cert.pem --tls-key ./key.pem
 | `--port` | `3001` | Port to listen on |
 | `--dir` | `.` | Static files directory |
 | `--proxy` | `""` | Upstream proxy target URL |
-| `--watch` | `.` | Comma-separated directories to watch |
 | `--tls-cert` | `""` | TLS certificate file path |
 | `--tls-key` | `""` | TLS private key file path |
 
@@ -86,12 +88,19 @@ By default, gosync reads `.gosync.yaml` from the current directory. Use the
 ```yaml
 port: "3001"
 dir: "."
-proxy: ""
-watch:
-  - "."
+proxy: "http://localhost:5173"
+
+# Proxy features (BrowserSync-compatible)
+proxy_timeout_seconds: 30
+proxy_change_origin: true
+proxy_auto_rewrite: true
+proxy_strip_cookies: true
+proxy_rewrite_links: true
+proxy_insecure: false
+
+# TLS
 tls_cert: ""
 tls_key: ""
-proxy_timeout_seconds: 30
 
 hub_options:
   rate_limit_conns: 100
@@ -112,10 +121,14 @@ Individual hub option env vars take precedence over `GOSYNC_HUB_OPTIONS`.
 | `GOSYNC_PORT` | Port to listen on |
 | `GOSYNC_DIR` | Static files directory |
 | `GOSYNC_PROXY` | Upstream proxy target URL |
-| `GOSYNC_WATCH` | Comma-separated directories to watch |
 | `GOSYNC_TLS_CERT` | TLS certificate file path |
 | `GOSYNC_TLS_KEY` | TLS private key file path |
 | `GOSYNC_PROXY_TIMEOUT_SECONDS` | Proxy response header timeout |
+| `GOSYNC_PROXY_CHANGE_ORIGIN` | Rewrite Host header to upstream target |
+| `GOSYNC_PROXY_AUTO_REWRITE` | Rewrite Location headers in redirects |
+| `GOSYNC_PROXY_STRIP_COOKIES` | Strip Domain from Set-Cookie headers |
+| `GOSYNC_PROXY_REWRITE_LINKS` | Rewrite target host in HTML bodies |
+| `GOSYNC_PROXY_INSECURE` | Skip upstream TLS verification |
 | `GOSYNC_HUB_OPTIONS` | JSON object overriding hub options (see below) |
 | `GOSYNC_RATE_LIMIT_CONNS` | Max concurrent WebSocket connections |
 | `GOSYNC_MAX_MSG_SIZE_BYTES` | Max WebSocket message size in bytes |
@@ -156,7 +169,7 @@ GOSYNC_RATE_LIMIT_CONNS=200 GOSYNC_MAX_MSG_SIZE_BYTES=8192 gosync
 
 ```bash
 docker run --rm -p 3001:3001 -v ./myapp:/app ghcr.io/gosync/gosync:latest \
-  --dir /app --watch /app
+  --dir /app
 ```
 
 ### Multi-arch images
@@ -176,11 +189,6 @@ push to `main` (tagged `latest`) and on semver tags (`v1.2.3`).
 ## Architecture
 
 ```
-                     ┌──────────────┐
-                     │  File Watcher │
-                     └──────┬───────┘
-                            │ change event
-                            ▼
           ┌──────────────┐  WebSocket   ┌──────────────┐
           │ Go HTTP      │◀────────────▶│ Browser Tabs │
           │ Server       │              └──────────────┘
@@ -200,9 +208,8 @@ push to `main` (tagged `latest`) and on semver tags (`v1.2.3`).
 ```
 cmd/gosync/        — CLI entrypoint
 internal/server/   — HTTP server setup
-internal/proxy/    — Reverse proxy
+internal/proxy/    — Reverse proxy with BrowserSync features
 internal/ws/       — WebSocket hub
-internal/watch/    — File watcher
 internal/inject/   — HTML injection middleware
 internal/clientjs/ — Embedded client JavaScript
 internal/config/   — Configuration loading (YAML, env vars, defaults)
@@ -213,9 +220,8 @@ internal/config/   — Configuration loading (YAML, env vars, defaults)
 1. **HTTP server** starts in either static file or reverse proxy mode
 2. **Middleware** injects a `<script src="/__bs.js">` tag into HTML responses
 3. **Client JS** connects to the server via WebSocket and listens for events
-4. **File watcher** monitors directories for changes using fsnotify
-5. On change: CSS files trigger stylesheet hot-swap; everything else triggers a full reload
-6. **Scroll/form sync** broadcasts user interactions to all connected clients
+4. **Proxy features** rewrite requests and responses for seamless upstream integration: `Host` header rewriting, redirect `Location` rewriting, cookie domain stripping, and HTML link rewriting
+5. **Scroll/form sync** broadcasts user interactions to all connected clients
 
 ## Security
 
@@ -225,6 +231,7 @@ internal/config/   — Configuration loading (YAML, env vars, defaults)
 - WebSocket rate limiting (max 100 concurrent connections, configurable)
 - Read/write deadlines and message size limits (configurable)
 - TLS minimum v1.2, AES-GCM / ChaCha20-Poly1305 only
+- Configurable proxy features: insecure TLS verification is opt-in only (`proxy_insecure: true`)
 
 ## License
 

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,14 +18,18 @@ type HubOptions struct {
 }
 
 type Config struct {
-	Port               string     `yaml:"port" json:"port"`
-	Dir                string     `yaml:"dir" json:"dir"`
-	Proxy              string     `yaml:"proxy" json:"proxy"`
-	Watch              []string   `yaml:"watch" json:"watch"`
-	TLSCert            string     `yaml:"tls_cert" json:"tls_cert"`
-	TLSKey             string     `yaml:"tls_key" json:"tls_key"`
-	ProxyTimeoutSecs   *int       `yaml:"proxy_timeout_seconds" json:"proxy_timeout_seconds"`
-	HubOpts            HubOptions `yaml:"hub_options" json:"hub_options"`
+	Port             string     `yaml:"port" json:"port"`
+	Dir              string     `yaml:"dir" json:"dir"`
+	Proxy            string     `yaml:"proxy" json:"proxy"`
+	TLSCert          string     `yaml:"tls_cert" json:"tls_cert"`
+	TLSKey           string     `yaml:"tls_key" json:"tls_key"`
+	ProxyTimeoutSecs *int       `yaml:"proxy_timeout_seconds" json:"proxy_timeout_seconds"`
+	ProxyChangeOrigin    *bool  `yaml:"proxy_change_origin" json:"proxy_change_origin"`
+	ProxyAutoRewrite     *bool  `yaml:"proxy_auto_rewrite" json:"proxy_auto_rewrite"`
+	ProxyStripCookies    *bool  `yaml:"proxy_strip_cookies" json:"proxy_strip_cookies"`
+	ProxyRewriteLinks    *bool  `yaml:"proxy_rewrite_links" json:"proxy_rewrite_links"`
+	ProxyInsecure        *bool  `yaml:"proxy_insecure" json:"proxy_insecure"`
+	HubOpts          HubOptions `yaml:"hub_options" json:"hub_options"`
 }
 
 func DefaultConfigPath() string {
@@ -62,19 +65,6 @@ func (cfg *Config) ApplyEnvVars() {
 	if v, ok := lookupEnv("GOSYNC_PROXY"); ok {
 		cfg.Proxy = v
 	}
-	if v, ok := lookupEnv("GOSYNC_WATCH"); ok {
-		parts := strings.Split(v, ",")
-		var dirs []string
-		seen := make(map[string]bool)
-		for _, d := range parts {
-			d = strings.TrimSpace(d)
-			if d != "" && !seen[d] {
-				dirs = append(dirs, d)
-				seen[d] = true
-			}
-		}
-		cfg.Watch = dirs
-	}
 	if v, ok := lookupEnv("GOSYNC_TLS_CERT"); ok {
 		cfg.TLSCert = v
 	}
@@ -84,6 +74,31 @@ func (cfg *Config) ApplyEnvVars() {
 	if v, ok := lookupEnv("GOSYNC_PROXY_TIMEOUT_SECONDS"); ok {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.ProxyTimeoutSecs = &n
+		}
+	}
+	if v, ok := lookupEnv("GOSYNC_PROXY_CHANGE_ORIGIN"); ok {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.ProxyChangeOrigin = &b
+		}
+	}
+	if v, ok := lookupEnv("GOSYNC_PROXY_AUTO_REWRITE"); ok {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.ProxyAutoRewrite = &b
+		}
+	}
+	if v, ok := lookupEnv("GOSYNC_PROXY_STRIP_COOKIES"); ok {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.ProxyStripCookies = &b
+		}
+	}
+	if v, ok := lookupEnv("GOSYNC_PROXY_REWRITE_LINKS"); ok {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.ProxyRewriteLinks = &b
+		}
+	}
+	if v, ok := lookupEnv("GOSYNC_PROXY_INSECURE"); ok {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.ProxyInsecure = &b
 		}
 	}
 
@@ -132,8 +147,25 @@ func (cfg *Config) ApplyDefaults() {
 	if cfg.Dir == "" {
 		cfg.Dir = "."
 	}
-	if len(cfg.Watch) == 0 {
-		cfg.Watch = []string{"."}
+	if cfg.ProxyChangeOrigin == nil {
+		v := true
+		cfg.ProxyChangeOrigin = &v
+	}
+	if cfg.ProxyAutoRewrite == nil {
+		v := true
+		cfg.ProxyAutoRewrite = &v
+	}
+	if cfg.ProxyStripCookies == nil {
+		v := true
+		cfg.ProxyStripCookies = &v
+	}
+	if cfg.ProxyRewriteLinks == nil {
+		v := true
+		cfg.ProxyRewriteLinks = &v
+	}
+	if cfg.ProxyInsecure == nil {
+		v := false
+		cfg.ProxyInsecure = &v
 	}
 }
 

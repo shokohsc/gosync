@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gosync/internal/proxy"
 	"github.com/gosync/internal/ws"
 )
 
@@ -295,18 +296,27 @@ func TestServerHasHub(t *testing.T) {
 	}
 }
 
-func TestServerWithProxyTimeout(t *testing.T) {
+func TestServerWithProxyOptions(t *testing.T) {
 	hub := ws.NewHub()
 	s := New(Config{
-		Port:         "3098",
-		Proxy:        "http://localhost:5173",
-		ProxyTimeout: 5 * time.Second,
+		Port:  "3098",
+		Proxy: "http://localhost:5173",
+		ProxyOpts: proxy.Options{
+			Timeout:            5 * time.Second,
+			ChangeOrigin:       true,
+			AutoRewrite:        true,
+			StripCookiesDomain: true,
+			RewriteLinks:       true,
+		},
 	}, hub)
 	if s == nil {
 		t.Fatal("expected non-nil server")
 	}
-	if s.config.ProxyTimeout != 5*time.Second {
-		t.Errorf("expected ProxyTimeout 5s, got %v", s.config.ProxyTimeout)
+	if s.config.ProxyOpts.Timeout != 5*time.Second {
+		t.Errorf("expected ProxyOpts.Timeout 5s, got %v", s.config.ProxyOpts.Timeout)
+	}
+	if !s.config.ProxyOpts.ChangeOrigin {
+		t.Error("expected ProxyOpts.ChangeOrigin true")
 	}
 }
 

@@ -41,12 +41,14 @@ func TestLoadConfigValidYAML(t *testing.T) {
 port: "8080"
 dir: /var/www
 proxy: http://localhost:3000
-watch:
-  - src
-  - assets
 tls_cert: /certs/cert.pem
 tls_key: /certs/key.pem
 proxy_timeout_seconds: 30
+proxy_change_origin: true
+proxy_auto_rewrite: false
+proxy_strip_cookies: true
+proxy_rewrite_links: false
+proxy_insecure: true
 hub_options:
   rate_limit_conns: 200
   max_msg_size_bytes: 8192
@@ -68,9 +70,6 @@ hub_options:
 	if cfg.Proxy != "http://localhost:3000" {
 		t.Errorf("expected proxy http://localhost:3000, got %s", cfg.Proxy)
 	}
-	if len(cfg.Watch) != 2 || cfg.Watch[0] != "src" || cfg.Watch[1] != "assets" {
-		t.Errorf("expected watch [src assets], got %v", cfg.Watch)
-	}
 	if cfg.TLSCert != "/certs/cert.pem" {
 		t.Errorf("expected tls_cert /certs/cert.pem, got %s", cfg.TLSCert)
 	}
@@ -79,6 +78,21 @@ hub_options:
 	}
 	if cfg.ProxyTimeoutSecs == nil || *cfg.ProxyTimeoutSecs != 30 {
 		t.Errorf("expected proxy_timeout_seconds 30, got %v", cfg.ProxyTimeoutSecs)
+	}
+	if cfg.ProxyChangeOrigin == nil || !*cfg.ProxyChangeOrigin {
+		t.Errorf("expected proxy_change_origin true")
+	}
+	if cfg.ProxyAutoRewrite == nil || *cfg.ProxyAutoRewrite {
+		t.Errorf("expected proxy_auto_rewrite false")
+	}
+	if cfg.ProxyStripCookies == nil || !*cfg.ProxyStripCookies {
+		t.Errorf("expected proxy_strip_cookies true")
+	}
+	if cfg.ProxyRewriteLinks == nil || *cfg.ProxyRewriteLinks {
+		t.Errorf("expected proxy_rewrite_links false")
+	}
+	if cfg.ProxyInsecure == nil || !*cfg.ProxyInsecure {
+		t.Errorf("expected proxy_insecure true")
 	}
 	if cfg.HubOpts.RateLimitConns == nil || *cfg.HubOpts.RateLimitConns != 200 {
 		t.Errorf("expected rate_limit_conns 200")
@@ -121,8 +135,20 @@ func TestApplyDefaults(t *testing.T) {
 	if cfg.Dir != "." {
 		t.Errorf("expected dir '.', got %s", cfg.Dir)
 	}
-	if len(cfg.Watch) != 1 || cfg.Watch[0] != "." {
-		t.Errorf("expected watch [.], got %v", cfg.Watch)
+	if cfg.ProxyChangeOrigin == nil || !*cfg.ProxyChangeOrigin {
+		t.Errorf("expected ProxyChangeOrigin true by default")
+	}
+	if cfg.ProxyAutoRewrite == nil || !*cfg.ProxyAutoRewrite {
+		t.Errorf("expected ProxyAutoRewrite true by default")
+	}
+	if cfg.ProxyStripCookies == nil || !*cfg.ProxyStripCookies {
+		t.Errorf("expected ProxyStripCookies true by default")
+	}
+	if cfg.ProxyRewriteLinks == nil || !*cfg.ProxyRewriteLinks {
+		t.Errorf("expected ProxyRewriteLinks true by default")
+	}
+	if cfg.ProxyInsecure == nil || *cfg.ProxyInsecure {
+		t.Errorf("expected ProxyInsecure false by default")
 	}
 }
 
@@ -135,16 +161,14 @@ func TestApplyDefaultsPartial(t *testing.T) {
 	if cfg.Dir != "/app" {
 		t.Errorf("expected dir /app, got %s", cfg.Dir)
 	}
-	if len(cfg.Watch) != 1 || cfg.Watch[0] != "." {
-		t.Errorf("expected watch [.], got %v", cfg.Watch)
-	}
 }
 
-func TestApplyDefaultsExistingWatch(t *testing.T) {
-	cfg := &Config{Watch: []string{"src", "lib"}}
+func TestApplyDefaultsKeepsExistingProxyOptions(t *testing.T) {
+	v := false
+	cfg := &Config{ProxyChangeOrigin: &v}
 	cfg.ApplyDefaults()
-	if len(cfg.Watch) != 2 || cfg.Watch[0] != "src" || cfg.Watch[1] != "lib" {
-		t.Errorf("expected watch [src lib], got %v", cfg.Watch)
+	if cfg.ProxyChangeOrigin == nil || *cfg.ProxyChangeOrigin {
+		t.Errorf("expected ProxyChangeOrigin to remain false")
 	}
 }
 
@@ -178,17 +202,6 @@ func TestApplyEnvVarsProxy(t *testing.T) {
 	cfg.ApplyEnvVars()
 	if cfg.Proxy != "http://backend:8080" {
 		t.Errorf("expected proxy http://backend:8080, got %s", cfg.Proxy)
-	}
-}
-
-func TestApplyEnvVarsWatch(t *testing.T) {
-	os.Setenv("GOSYNC_WATCH", "src, assets, src")
-	defer os.Unsetenv("GOSYNC_WATCH")
-
-	cfg := &Config{Watch: []string{"."}}
-	cfg.ApplyEnvVars()
-	if len(cfg.Watch) != 2 || cfg.Watch[0] != "src" || cfg.Watch[1] != "assets" {
-		t.Errorf("expected watch [src assets] (deduped), got %v", cfg.Watch)
 	}
 }
 
@@ -254,8 +267,8 @@ func TestApplyEnvVarsHubOptionsJSON(t *testing.T) {
 	defer os.Unsetenv("GOSYNC_HUB_OPTIONS")
 
 	cfg := &Config{HubOpts: HubOptions{
-		RateLimitConns:  intPtr(100),
-		PongWaitSecs:    intPtr(60),
+		RateLimitConns: intPtr(100),
+		PongWaitSecs:   intPtr(60),
 	}}
 	cfg.ApplyEnvVars()
 
@@ -378,6 +391,85 @@ func TestApplyEnvVarsWriteWait(t *testing.T) {
 	}
 }
 
+func TestApplyEnvVarsProxyChangeOrigin(t *testing.T) {
+	os.Setenv("GOSYNC_PROXY_CHANGE_ORIGIN", "false")
+	defer os.Unsetenv("GOSYNC_PROXY_CHANGE_ORIGIN")
+
+	cfg := &Config{}
+	cfg.ApplyEnvVars()
+	if cfg.ProxyChangeOrigin == nil || *cfg.ProxyChangeOrigin {
+		t.Errorf("expected ProxyChangeOrigin false")
+	}
+}
+
+func TestApplyEnvVarsProxyChangeOriginTrue(t *testing.T) {
+	os.Setenv("GOSYNC_PROXY_CHANGE_ORIGIN", "true")
+	defer os.Unsetenv("GOSYNC_PROXY_CHANGE_ORIGIN")
+
+	cfg := &Config{}
+	cfg.ApplyEnvVars()
+	if cfg.ProxyChangeOrigin == nil || !*cfg.ProxyChangeOrigin {
+		t.Errorf("expected ProxyChangeOrigin true")
+	}
+}
+
+func TestApplyEnvVarsProxyAutoRewrite(t *testing.T) {
+	os.Setenv("GOSYNC_PROXY_AUTO_REWRITE", "true")
+	defer os.Unsetenv("GOSYNC_PROXY_AUTO_REWRITE")
+
+	cfg := &Config{}
+	cfg.ApplyEnvVars()
+	if cfg.ProxyAutoRewrite == nil || !*cfg.ProxyAutoRewrite {
+		t.Errorf("expected ProxyAutoRewrite true")
+	}
+}
+
+func TestApplyEnvVarsProxyStripCookies(t *testing.T) {
+	os.Setenv("GOSYNC_PROXY_STRIP_COOKIES", "true")
+	defer os.Unsetenv("GOSYNC_PROXY_STRIP_COOKIES")
+
+	cfg := &Config{}
+	cfg.ApplyEnvVars()
+	if cfg.ProxyStripCookies == nil || !*cfg.ProxyStripCookies {
+		t.Errorf("expected ProxyStripCookies true")
+	}
+}
+
+func TestApplyEnvVarsProxyRewriteLinks(t *testing.T) {
+	os.Setenv("GOSYNC_PROXY_REWRITE_LINKS", "false")
+	defer os.Unsetenv("GOSYNC_PROXY_REWRITE_LINKS")
+
+	cfg := &Config{}
+	cfg.ApplyEnvVars()
+	if cfg.ProxyRewriteLinks == nil || *cfg.ProxyRewriteLinks {
+		t.Errorf("expected ProxyRewriteLinks false")
+	}
+}
+
+func TestApplyEnvVarsProxyInsecure(t *testing.T) {
+	os.Setenv("GOSYNC_PROXY_INSECURE", "true")
+	defer os.Unsetenv("GOSYNC_PROXY_INSECURE")
+
+	cfg := &Config{}
+	cfg.ApplyEnvVars()
+	if cfg.ProxyInsecure == nil || !*cfg.ProxyInsecure {
+		t.Errorf("expected ProxyInsecure true")
+	}
+}
+
+func TestApplyEnvVarsHubIndividualBadValue(t *testing.T) {
+	os.Setenv("GOSYNC_RATE_LIMIT_CONNS", "abc")
+	defer os.Unsetenv("GOSYNC_RATE_LIMIT_CONNS")
+
+	cfg := &Config{HubOpts: HubOptions{
+		RateLimitConns: intPtr(100),
+	}}
+	cfg.ApplyEnvVars()
+	if cfg.HubOpts.RateLimitConns == nil || *cfg.HubOpts.RateLimitConns != 100 {
+		t.Errorf("expected RateLimitConns to remain 100 on bad value, got %v", cfg.HubOpts.RateLimitConns)
+	}
+}
+
 func TestFullPipelineFileOverEnv(t *testing.T) {
 	f, err := os.CreateTemp("", "gosync-*.yaml")
 	if err != nil {
@@ -388,8 +480,6 @@ func TestFullPipelineFileOverEnv(t *testing.T) {
 port: "8080"
 dir: /from/file
 proxy: http://file:3000
-watch:
-  - src
 hub_options:
   rate_limit_conns: 200
 `)
@@ -421,22 +511,6 @@ hub_options:
 	}
 	if cfg.HubOpts.RateLimitConns == nil || *cfg.HubOpts.RateLimitConns != 999 {
 		t.Errorf("expected RateLimitConns 999 (env override), got %v", cfg.HubOpts.RateLimitConns)
-	}
-	if len(cfg.Watch) != 1 || cfg.Watch[0] != "src" {
-		t.Errorf("expected watch [src] (file-only), got %v", cfg.Watch)
-	}
-}
-
-func TestApplyEnvVarsIndividualBadValue(t *testing.T) {
-	os.Setenv("GOSYNC_RATE_LIMIT_CONNS", "abc")
-	defer os.Unsetenv("GOSYNC_RATE_LIMIT_CONNS")
-
-	cfg := &Config{HubOpts: HubOptions{
-		RateLimitConns: intPtr(100),
-	}}
-	cfg.ApplyEnvVars()
-	if cfg.HubOpts.RateLimitConns == nil || *cfg.HubOpts.RateLimitConns != 100 {
-		t.Errorf("expected RateLimitConns to remain 100 on bad value, got %v", cfg.HubOpts.RateLimitConns)
 	}
 }
 
