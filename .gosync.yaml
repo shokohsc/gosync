@@ -1,0 +1,15 @@
+port: "3001"
+dir: "."
+proxy: ""
+watch:
+  - "."
+tls_cert: ""
+tls_key: ""
+proxy_timeout_seconds: 30
+
+hub_options:
+  rate_limit_conns: 100
+  max_msg_size_bytes: 4096
+  pong_wait_seconds: 60
+  ping_pong_interval_seconds: 54
+  write_wait_seconds: 10

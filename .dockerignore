@@ -1,0 +1,10 @@
+.git
+.gitignore
+.github
+.dockerignore
+Dockerfile
+*.md
+coverage.out
+.DS_Store
+plan.md
+gosync
