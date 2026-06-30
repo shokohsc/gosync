@@ -9,7 +9,7 @@ import (
 )
 
 func TestMiddlewareSkipsOurEndpoints(t *testing.T) {
-	for _, path := range []string{"/__bs", "/__bs.js", "/__bs/ws", "/__bs/ui"} {
+	for _, path := range []string{"/__bs", "/__bs.js", "/__bs/ws", "/__bs/ui", "/__browser_sync__"} {
 		handler := Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte("ok"))
 		}))

@@ -29,10 +29,12 @@ type HubOptions struct {
 type Event struct {
 	Type string          `json:"type"`
 	Path string          `json:"path,omitempty"`
+	URL  string          `json:"url,omitempty"`
 	Data json.RawMessage `json:"data,omitempty"`
 }
 
 type Client struct {
+	id   uint64
 	conn *websocket.Conn
 	send chan []byte
 }
@@ -46,8 +48,11 @@ type Hub struct {
 	pongWait        time.Duration
 	pingPeriod      time.Duration
 	writeWait       time.Duration
+	nextID          uint64
 
 	BroadcastFn func(event Event)
+
+	HelloData json.RawMessage
 }
 
 func defaultHubOptions() HubOptions {
@@ -119,17 +124,30 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
+	h.mu.Lock()
+	h.nextID++
+	clientID := h.nextID
 	client := &Client{
+		id:   clientID,
 		conn: conn,
 		send: make(chan []byte, 64),
 	}
-
-	h.mu.Lock()
 	h.clients[client] = true
 	h.mu.Unlock()
 
 	go h.writePump(client)
 	go h.readPump(client)
+
+	helloData := h.HelloData
+	if helloData == nil {
+		helloData = json.RawMessage(`{}`)
+	}
+	hello := Event{Type: "hello", Data: helloData}
+	data, _ := json.Marshal(hello)
+	select {
+	case client.send <- data:
+	default:
+	}
 }
 
 func (h *Hub) Broadcast(event Event) {
@@ -154,6 +172,40 @@ func (h *Hub) Broadcast(event Event) {
 			go h.closeClient(client)
 		}
 	}
+}
+
+func (h *Hub) BroadcastExcept(sender *Client, event Event) {
+	data, err := json.Marshal(event)
+	if err != nil {
+		log.Printf("json marshal error: %v", err)
+		return
+	}
+
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	for client := range h.clients {
+		if client == sender {
+			continue
+		}
+		select {
+		case client.send <- data:
+		default:
+			go h.closeClient(client)
+		}
+	}
+}
+
+func (h *Hub) Notify(message string, timeout time.Duration) {
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	timeoutMS := int(timeout / time.Millisecond)
+	data, _ := json.Marshal(map[string]interface{}{
+		"message": message,
+		"timeout": timeoutMS,
+	})
+	h.Broadcast(Event{Type: "browser:notify", Data: data})
 }
 
 func (h *Hub) writePump(client *Client) {
@@ -190,9 +242,19 @@ func (h *Hub) readPump(client *Client) {
 	}()
 
 	for {
-		_, _, err := client.conn.ReadMessage()
+		_, message, err := client.conn.ReadMessage()
 		if err != nil {
 			break
+		}
+
+		var ev Event
+		if err := json.Unmarshal(message, &ev); err != nil {
+			continue
+		}
+
+		switch ev.Type {
+		case "scroll", "click", "input:text", "input:toggles", "form:submit", "form:reset":
+			h.BroadcastExcept(client, ev)
 		}
 	}
 }

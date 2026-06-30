@@ -24,10 +24,12 @@ CGO_ENABLED=0 GOTOOLCHAIN=local go test -cover -timeout 60s ./...
 ## Architecture
 
 - `cmd/gosync/main.go` entrypoint. `run()` does setup; `main()` calls `run()` and `log.Fatalf` on error.
-- `internal/server/` wires hub, middleware, proxy/file-server into an `http.Server` with timeouts.
+- `internal/server/` wires hub, middleware, proxy/file-server, protocol into an `http.Server` with timeouts.
 - `internal/inject/` wraps `http.ResponseWriter` to buffer HTML, injects `<script src="/__bs.js">` before `</body>`.
-- `internal/ws/` gorilla/websocket hub. `HandleWS` upgrades, runs read/write pumps with pings/pongs. Rate limited to 100 conns.
+- `internal/ws/` gorilla/websocket hub. `HandleWS` upgrades, runs read/write pumps with pings/pongs. Sends `hello` on connect. Broadcasts client events (`scroll`, `click`, `input:text`, `input:toggles`, `form:submit`, `form:reset`) to other clients. Rate limited to 100 conns.
 - `internal/proxy/` `httputil.ReverseProxy` with BrowserSync features: changeOrigin, autoRewrite, cookieDomainRewrite, rewriteLinks, custom headers, insecure TLS.
+- `internal/protocol/` HTTP protocol endpoint at `/__browser_sync__`. GET for method-based actions (reload, notify, exit), POST for arbitrary socket events.
+- `internal/clientjs/` Go embed of `client.js` — served at `/__bs.js`. Full ghost mode: scroll/click/form sync, notifications, browser location, exponential backoff reconnect, hello/options handshake.
 - `internal/clientjs/` Go embed of `client.js` — served at `/__bs.js`.
 
 ## Key conventions

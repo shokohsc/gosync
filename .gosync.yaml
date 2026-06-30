@@ -10,6 +10,19 @@ proxy_strip_cookies: true
 proxy_rewrite_links: true
 proxy_insecure: false
 
+# Notifications
+notify: true
+
+# Ghost mode (cross-device sync)
+ghost_mode:
+  clicks: true
+  scroll: true
+  location: true
+  forms:
+    submit: true
+    inputs: true
+    toggles: true
+
 # TLS
 tls_cert: ""
 tls_key: ""

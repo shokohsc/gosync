@@ -514,4 +514,210 @@ hub_options:
 	}
 }
 
+func TestApplyDefaultsNotify(t *testing.T) {
+	cfg := &Config{}
+	cfg.ApplyDefaults()
+	if cfg.Notify == nil || !*cfg.Notify {
+		t.Errorf("expected Notify true by default")
+	}
+}
+
+func TestApplyDefaultsGhostMode(t *testing.T) {
+	cfg := &Config{}
+	cfg.ApplyDefaults()
+	if cfg.GhostMode == nil {
+		t.Fatal("expected GhostMode to be set")
+	}
+	if cfg.GhostMode.Clicks == nil || !*cfg.GhostMode.Clicks {
+		t.Errorf("expected GhostMode.Clicks true")
+	}
+	if cfg.GhostMode.Scroll == nil || !*cfg.GhostMode.Scroll {
+		t.Errorf("expected GhostMode.Scroll true")
+	}
+	if cfg.GhostMode.Location == nil || !*cfg.GhostMode.Location {
+		t.Errorf("expected GhostMode.Location true")
+	}
+	if cfg.GhostMode.Forms == nil {
+		t.Fatal("expected GhostMode.Forms to be set")
+	}
+	if cfg.GhostMode.Forms.Submit == nil || !*cfg.GhostMode.Forms.Submit {
+		t.Errorf("expected GhostMode.Forms.Submit true")
+	}
+	if cfg.GhostMode.Forms.Inputs == nil || !*cfg.GhostMode.Forms.Inputs {
+		t.Errorf("expected GhostMode.Forms.Inputs true")
+	}
+	if cfg.GhostMode.Forms.Toggles == nil || !*cfg.GhostMode.Forms.Toggles {
+		t.Errorf("expected GhostMode.Forms.Toggles true")
+	}
+}
+
+func TestApplyDefaultsKeepsExistingNotify(t *testing.T) {
+	v := false
+	cfg := &Config{Notify: &v}
+	cfg.ApplyDefaults()
+	if cfg.Notify == nil || *cfg.Notify {
+		t.Errorf("expected Notify to remain false")
+	}
+}
+
+func TestLoadConfigWithGhostMode(t *testing.T) {
+	f, err := os.CreateTemp("", "gosync-*.yaml")
+	if err != nil {
+		t.Fatalf("temp file: %v", err)
+	}
+	defer os.Remove(f.Name())
+	f.WriteString(`
+port: "8080"
+notify: false
+ghost_mode:
+  clicks: false
+  scroll: true
+  location: false
+  forms:
+    submit: true
+    inputs: false
+    toggles: false
+`)
+	f.Close()
+
+	cfg, err := LoadConfig(f.Name())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Notify == nil || *cfg.Notify {
+		t.Errorf("expected Notify false")
+	}
+	if cfg.GhostMode == nil {
+		t.Fatal("expected GhostMode to be set")
+	}
+	if cfg.GhostMode.Clicks == nil || *cfg.GhostMode.Clicks {
+		t.Errorf("expected GhostMode.Clicks false")
+	}
+	if cfg.GhostMode.Scroll == nil || !*cfg.GhostMode.Scroll {
+		t.Errorf("expected GhostMode.Scroll true")
+	}
+	if cfg.GhostMode.Forms == nil {
+		t.Fatal("expected GhostMode.Forms to be set")
+	}
+	if cfg.GhostMode.Forms.Submit == nil || !*cfg.GhostMode.Forms.Submit {
+		t.Errorf("expected GhostMode.Forms.Submit true")
+	}
+	if cfg.GhostMode.Forms.Inputs == nil || *cfg.GhostMode.Forms.Inputs {
+		t.Errorf("expected GhostMode.Forms.Inputs false")
+	}
+}
+
+func TestApplyEnvVarsNotify(t *testing.T) {
+	os.Setenv("GOSYNC_NOTIFY", "false")
+	defer os.Unsetenv("GOSYNC_NOTIFY")
+
+	cfg := &Config{}
+	cfg.ApplyEnvVars()
+	if cfg.Notify == nil || *cfg.Notify {
+		t.Errorf("expected Notify false")
+	}
+}
+
+func TestApplyEnvVarsGhostModeJSON(t *testing.T) {
+	os.Setenv("GOSYNC_GHOST_MODE", `{"clicks":false,"scroll":false}`)
+	defer os.Unsetenv("GOSYNC_GHOST_MODE")
+
+	cfg := &Config{GhostMode: &GhostMode{
+		Clicks: boolPtr(true),
+		Scroll: boolPtr(true),
+	}}
+	cfg.ApplyEnvVars()
+	if cfg.GhostMode.Clicks == nil || *cfg.GhostMode.Clicks {
+		t.Errorf("expected GhostMode.Clicks false after env override")
+	}
+	if cfg.GhostMode.Scroll == nil || *cfg.GhostMode.Scroll {
+		t.Errorf("expected GhostMode.Scroll false after env override")
+	}
+}
+
+func TestMergeGhostMode(t *testing.T) {
+	v1 := true
+	v2 := false
+	base := &GhostMode{Clicks: &v1, Scroll: &v1}
+	override := &GhostMode{Clicks: &v2}
+	result := mergeGhostMode(base, override)
+	if *result.Clicks != false {
+		t.Errorf("expected Clicks false after merge")
+	}
+	if *result.Scroll != true {
+		t.Errorf("expected Scroll to remain true")
+	}
+}
+
+func TestMergeGhostModeNilBase(t *testing.T) {
+	v := true
+	override := &GhostMode{Clicks: &v}
+	result := mergeGhostMode(nil, override)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if *result.Clicks != true {
+		t.Errorf("expected Clicks true")
+	}
+}
+
+func TestMergeGhostModeNilOverride(t *testing.T) {
+	v := true
+	base := &GhostMode{Clicks: &v}
+	result := mergeGhostMode(base, nil)
+	if result != base {
+		t.Error("expected result to be base")
+	}
+}
+
+func TestApplyEnvVarsGhostModeInvalidJSON(t *testing.T) {
+	os.Setenv("GOSYNC_GHOST_MODE", "not-json")
+	defer os.Unsetenv("GOSYNC_GHOST_MODE")
+
+	cfg := &Config{GhostMode: &GhostMode{Clicks: boolPtr(true)}}
+	cfg.ApplyEnvVars()
+	if cfg.GhostMode == nil || *cfg.GhostMode.Clicks != true {
+		t.Errorf("expected GhostMode.Clicks to remain true on invalid JSON")
+	}
+}
+
+func TestFullPipelineWithGhostMode(t *testing.T) {
+	f, err := os.CreateTemp("", "gosync-*.yaml")
+	if err != nil {
+		t.Fatalf("temp file: %v", err)
+	}
+	defer os.Remove(f.Name())
+	f.WriteString(`
+port: "8080"
+ghost_mode:
+  clicks: false
+  forms:
+    submit: false
+`)
+	f.Close()
+
+	cfg, err := LoadConfig(f.Name())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cfg.ApplyEnvVars()
+	cfg.ApplyDefaults()
+
+	if cfg.GhostMode == nil {
+		t.Fatal("expected GhostMode to be set")
+	}
+	if cfg.GhostMode.Clicks == nil || *cfg.GhostMode.Clicks {
+		t.Errorf("expected GhostMode.Clicks false from file")
+	}
+	if cfg.GhostMode.Scroll == nil || !*cfg.GhostMode.Scroll {
+		t.Errorf("expected GhostMode.Scroll true from defaults")
+	}
+	if cfg.GhostMode.Forms == nil || *cfg.GhostMode.Forms.Submit {
+		t.Errorf("expected GhostMode.Forms.Submit false from file")
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
+
 func intPtr(n int) *int { return &n }

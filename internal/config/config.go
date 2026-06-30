@@ -17,6 +17,19 @@ type HubOptions struct {
 	WriteWaitSecs        *int `yaml:"write_wait_seconds" json:"WriteWaitSeconds"`
 }
 
+type GhostMode struct {
+	Clicks   *bool      `yaml:"clicks" json:"clicks"`
+	Scroll   *bool      `yaml:"scroll" json:"scroll"`
+	Location *bool      `yaml:"location" json:"location"`
+	Forms    *FormsMode `yaml:"forms" json:"forms"`
+}
+
+type FormsMode struct {
+	Submit *bool `yaml:"submit" json:"submit"`
+	Inputs *bool `yaml:"inputs" json:"inputs"`
+	Toggles *bool `yaml:"toggles" json:"toggles"`
+}
+
 type Config struct {
 	Port             string     `yaml:"port" json:"port"`
 	Dir              string     `yaml:"dir" json:"dir"`
@@ -29,6 +42,8 @@ type Config struct {
 	ProxyStripCookies    *bool  `yaml:"proxy_strip_cookies" json:"proxy_strip_cookies"`
 	ProxyRewriteLinks    *bool  `yaml:"proxy_rewrite_links" json:"proxy_rewrite_links"`
 	ProxyInsecure        *bool  `yaml:"proxy_insecure" json:"proxy_insecure"`
+	Notify           *bool      `yaml:"notify" json:"notify"`
+	GhostMode        *GhostMode `yaml:"ghost_mode" json:"ghost_mode"`
 	HubOpts          HubOptions `yaml:"hub_options" json:"hub_options"`
 }
 
@@ -101,6 +116,17 @@ func (cfg *Config) ApplyEnvVars() {
 			cfg.ProxyInsecure = &b
 		}
 	}
+	if v, ok := lookupEnv("GOSYNC_NOTIFY"); ok {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.Notify = &b
+		}
+	}
+	if v, ok := lookupEnv("GOSYNC_GHOST_MODE"); ok {
+		var gm GhostMode
+		if err := json.Unmarshal([]byte(v), &gm); err == nil {
+			cfg.GhostMode = mergeGhostMode(cfg.GhostMode, &gm)
+		}
+	}
 
 	cfg.applyHubOptsEnv()
 }
@@ -167,6 +193,40 @@ func (cfg *Config) ApplyDefaults() {
 		v := false
 		cfg.ProxyInsecure = &v
 	}
+	if cfg.Notify == nil {
+		v := true
+		cfg.Notify = &v
+	}
+	if cfg.GhostMode == nil {
+		cfg.GhostMode = &GhostMode{}
+	}
+	if cfg.GhostMode.Clicks == nil {
+		v := true
+		cfg.GhostMode.Clicks = &v
+	}
+	if cfg.GhostMode.Scroll == nil {
+		v := true
+		cfg.GhostMode.Scroll = &v
+	}
+	if cfg.GhostMode.Location == nil {
+		v := true
+		cfg.GhostMode.Location = &v
+	}
+	if cfg.GhostMode.Forms == nil {
+		cfg.GhostMode.Forms = &FormsMode{}
+	}
+	if cfg.GhostMode.Forms.Submit == nil {
+		v := true
+		cfg.GhostMode.Forms.Submit = &v
+	}
+	if cfg.GhostMode.Forms.Inputs == nil {
+		v := true
+		cfg.GhostMode.Forms.Inputs = &v
+	}
+	if cfg.GhostMode.Forms.Toggles == nil {
+		v := true
+		cfg.GhostMode.Forms.Toggles = &v
+	}
 }
 
 func lookupEnv(key string) (string, bool) {
@@ -192,6 +252,40 @@ func mergePtrOpts(base, override HubOptions) HubOptions {
 	}
 	if override.WriteWaitSecs != nil {
 		base.WriteWaitSecs = override.WriteWaitSecs
+	}
+	return base
+}
+
+func mergeGhostMode(base, override *GhostMode) *GhostMode {
+	if base == nil {
+		return override
+	}
+	if override == nil {
+		return base
+	}
+	if override.Clicks != nil {
+		base.Clicks = override.Clicks
+	}
+	if override.Scroll != nil {
+		base.Scroll = override.Scroll
+	}
+	if override.Location != nil {
+		base.Location = override.Location
+	}
+	if override.Forms != nil {
+		if base.Forms == nil {
+			base.Forms = override.Forms
+		} else {
+			if override.Forms.Submit != nil {
+				base.Forms.Submit = override.Forms.Submit
+			}
+			if override.Forms.Inputs != nil {
+				base.Forms.Inputs = override.Forms.Inputs
+			}
+			if override.Forms.Toggles != nil {
+				base.Forms.Toggles = override.Forms.Toggles
+			}
+		}
 	}
 	return base
 }

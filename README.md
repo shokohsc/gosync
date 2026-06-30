@@ -16,6 +16,12 @@ A fast, lightweight BrowserSync clone written in Go. Uses a reverse proxy and We
 - **CSS injection** — hot-swap stylesheets without a full reload
 - **WebSocket sync** — real-time events pushed to all connected browsers
 - **Scroll sync** — synchronized scrolling across browser tabs
+- **Click sync** — mirror click events across devices
+- **Form sync** — synchronize text inputs, checkboxes, selects, submits, and resets
+- **Location sync** — synchronize browser URL/location across devices
+- **Notifications** — in-browser notification overlay
+- **Remote control** — HTTP protocol endpoint (`/__browser_sync__`) for triggering reloads, notifications, and events
+- **Ghost mode** — configure which sync features are enabled (clicks, scroll, forms, location)
 - **TLS support** — optional HTTPS/WSS with modern cipher suites
 - **Config file** — YAML-based configuration (`.gosync.yaml`)
 - **Environment variable overrides** — all options configurable via env vars
@@ -98,6 +104,19 @@ proxy_strip_cookies: true
 proxy_rewrite_links: true
 proxy_insecure: false
 
+# Notifications
+notify: true
+
+# Ghost mode (cross-device sync)
+ghost_mode:
+  clicks: true
+  scroll: true
+  location: true
+  forms:
+    submit: true
+    inputs: true
+    toggles: true
+
 # TLS
 tls_cert: ""
 tls_key: ""
@@ -129,12 +148,77 @@ Individual hub option env vars take precedence over `GOSYNC_HUB_OPTIONS`.
 | `GOSYNC_PROXY_STRIP_COOKIES` | Strip Domain from Set-Cookie headers |
 | `GOSYNC_PROXY_REWRITE_LINKS` | Rewrite target host in HTML bodies |
 | `GOSYNC_PROXY_INSECURE` | Skip upstream TLS verification |
+| `GOSYNC_NOTIFY` | Enable/disable browser notifications |
+| `GOSYNC_GHOST_MODE` | JSON object configuring ghost mode features |
 | `GOSYNC_HUB_OPTIONS` | JSON object overriding hub options (see below) |
 | `GOSYNC_RATE_LIMIT_CONNS` | Max concurrent WebSocket connections |
 | `GOSYNC_MAX_MSG_SIZE_BYTES` | Max WebSocket message size in bytes |
 | `GOSYNC_PING_PONG_INTERVAL_SECONDS` | Ping/pong interval |
 | `GOSYNC_PONG_WAIT_SECONDS` | Pong response wait time |
 | `GOSYNC_WRITE_WAIT_SECONDS` | Write deadline |
+
+### Ghost mode
+
+Ghost mode controls which interactions are synchronized across connected browsers.
+All features are enabled by default.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `clicks` | `true` | Mirror click events across devices |
+| `scroll` | `true` | Mirror scroll positions |
+| `location` | `true` | Sync browser URL/location |
+| `forms.submit` | `true` | Sync form submissions |
+| `forms.inputs` | `true` | Sync text input values |
+| `forms.toggles` | `true` | Sync checkbox/radio/select changes |
+
+```yaml
+ghost_mode:
+  clicks: true
+  scroll: true
+  location: true
+  forms:
+    submit: true
+    inputs: true
+    toggles: true
+```
+
+### Remote control API
+
+gosync provides an HTTP protocol endpoint at `/__browser_sync__` for remote
+control, similar to BrowserSync's HTTP protocol.
+
+**GET requests** — trigger actions via query parameters:
+
+```
+# Full page reload
+GET /__browser_sync__?method=reload
+
+# Reload specific file
+GET /__browser_sync__?method=reload&args=style.css&args=index.html
+
+# Show notification
+GET /__browser_sync__?method=notify&args=Build+complete
+
+# Exit
+GET /__browser_sync__?method=exit
+```
+
+**POST requests** — emit arbitrary socket events:
+
+```json
+POST /__browser_sync__
+Content-Type: application/json
+
+{"type":"browser:reload"}
+```
+
+```json
+{"type":"browser:notify","data":{"message":"Build complete","timeout":3000}}
+```
+
+```json
+{"type":"browser:location","data":{"url":"/new-page"}}
+```
 
 ### HubOptions
 
@@ -213,15 +297,17 @@ internal/ws/       — WebSocket hub
 internal/inject/   — HTML injection middleware
 internal/clientjs/ — Embedded client JavaScript
 internal/config/   — Configuration loading (YAML, env vars, defaults)
+internal/protocol/ — HTTP protocol endpoint for remote control
 ```
 
 ## How it works
 
 1. **HTTP server** starts in either static file or reverse proxy mode
 2. **Middleware** injects a `<script src="/__bs.js">` tag into HTML responses
-3. **Client JS** connects to the server via WebSocket and listens for events
+3. **Client JS** connects to the server via WebSocket, receives initial config, and listens for events
 4. **Proxy features** rewrite requests and responses for seamless upstream integration: `Host` header rewriting, redirect `Location` rewriting, cookie domain stripping, and HTML link rewriting
-5. **Scroll/form sync** broadcasts user interactions to all connected clients
+5. **Ghost mode** broadcasts user interactions (scroll, clicks, form input, form toggles, form submits/resets) to all connected clients
+6. **Remote control** via `/__browser_sync__` HTTP endpoint enables triggering reloads, notifications, and events from build tools or scripts
 
 ## Security
 

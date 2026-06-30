@@ -31,7 +31,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip injection for our own endpoints
-		if r.URL.Path == "/__bs" || r.URL.Path == "/__bs.js" || strings.HasPrefix(r.URL.Path, "/__bs/") {
+		if r.URL.Path == "/__bs" || r.URL.Path == "/__bs.js" || strings.HasPrefix(r.URL.Path, "/__bs/") || r.URL.Path == "/__browser_sync__" {
 			next.ServeHTTP(w, r)
 			return
 		}

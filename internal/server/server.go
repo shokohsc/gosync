@@ -8,6 +8,7 @@ import (
 
 	"github.com/gosync/internal/clientjs"
 	"github.com/gosync/internal/inject"
+	"github.com/gosync/internal/protocol"
 	"github.com/gosync/internal/proxy"
 	"github.com/gosync/internal/ws"
 )
@@ -50,6 +51,7 @@ func (s *Server) Start() error {
 		w.Header().Set("Content-Type", "application/javascript")
 		w.Write([]byte(clientjs.ClientJS))
 	}))
+	mux.Handle("/__browser_sync__", protocol.NewHandler(s.hub))
 
 	mux.Handle("/", inject.Middleware(handler))
 

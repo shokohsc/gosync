@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -28,6 +29,16 @@ func run(cfg *config.Config) error {
 	}
 
 	hub := ws.NewHubWithOptions(hubOpts)
+
+	if cfg.GhostMode != nil {
+		helloData, err := json.Marshal(map[string]interface{}{
+			"ghostMode": cfg.GhostMode,
+			"notify":    boolVal(cfg.Notify),
+		})
+		if err == nil {
+			hub.HelloData = helloData
+		}
+	}
 
 	var proxyTimeout time.Duration
 	if cfg.ProxyTimeoutSecs != nil {

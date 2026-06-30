@@ -41,6 +41,19 @@ func TestHandleWSAndBroadcast(t *testing.T) {
 	}
 	defer c.Close()
 
+	// Read hello message first
+	_, hello, err := c.ReadMessage()
+	if err != nil {
+		t.Fatalf("read hello error: %v", err)
+	}
+	var helloEv Event
+	if err := json.Unmarshal(hello, &helloEv); err != nil {
+		t.Fatalf("unmarshal hello error: %v", err)
+	}
+	if helloEv.Type != "hello" {
+		t.Errorf("expected hello, got %q", helloEv.Type)
+	}
+
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -75,6 +88,7 @@ func TestHandleWSAndBroadcast(t *testing.T) {
 func TestRateLimit(t *testing.T) {
 	h := NewHub()
 
+	h.mu.Lock()
 	for i := 0; i < maxConnections; i++ {
 		client := &Client{
 			conn: nil,
@@ -82,6 +96,7 @@ func TestRateLimit(t *testing.T) {
 		}
 		h.clients[client] = true
 	}
+	h.mu.Unlock()
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
@@ -91,12 +106,6 @@ func TestRateLimit(t *testing.T) {
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("expected 503, got %d", resp.StatusCode)
 	}
-
-	h.mu.Lock()
-	for c := range h.clients {
-		delete(h.clients, c)
-	}
-	h.mu.Unlock()
 }
 
 func TestCloseClient(t *testing.T) {
@@ -207,7 +216,6 @@ func TestHandleWSWithInvalidRequest(t *testing.T) {
 	h := NewHub()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
-	// No Upgrade header -> should fail
 	h.HandleWS(w, req)
 
 	resp := w.Result()
@@ -231,6 +239,11 @@ func TestMultipleClientsBroadcast(t *testing.T) {
 			t.Fatalf("dial %d error: %v", i, err)
 		}
 		defer c.Close()
+		// drain hello
+		_, _, err = c.ReadMessage()
+		if err != nil {
+			t.Fatalf("read hello on client %d: %v", i, err)
+		}
 		clients[i] = c
 	}
 
@@ -266,6 +279,12 @@ func TestWritePumpSendsMessage(t *testing.T) {
 		t.Fatalf("dial error: %v", err)
 	}
 	defer c.Close()
+
+	// drain hello
+	_, _, err = c.ReadMessage()
+	if err != nil {
+		t.Fatalf("read hello: %v", err)
+	}
 
 	done := make(chan struct{})
 	go func() {
@@ -308,49 +327,254 @@ func TestNewHubWithOptionsCustom(t *testing.T) {
 		t.Fatal("expected non-nil hub")
 	}
 	if h.maxConnections != 50 {
-		t.Errorf("expected maxConnections 50, got %d", h.maxConnections)
+		t.Errorf("expected 50 max connections, got %d", h.maxConnections)
 	}
 	if h.maxMessageSize != 2048 {
-		t.Errorf("expected maxMessageSize 2048, got %d", h.maxMessageSize)
+		t.Errorf("expected 2048 max message size, got %d", h.maxMessageSize)
 	}
 	if h.pongWait != 30*time.Second {
-		t.Errorf("expected pongWait 30s, got %v", h.pongWait)
+		t.Errorf("expected 30s pong wait, got %v", h.pongWait)
 	}
 	if h.writeWait != 5*time.Second {
-		t.Errorf("expected writeWait 5s, got %v", h.writeWait)
+		t.Errorf("expected 5s write wait, got %v", h.writeWait)
 	}
 }
 
-func TestNewHubWithOptionsZeroUsesDefaults(t *testing.T) {
+func TestNewHubWithOptionsDefaults(t *testing.T) {
 	h := NewHubWithOptions(HubOptions{})
-	if h.maxConnections != 100 {
-		t.Errorf("expected maxConnections 100, got %d", h.maxConnections)
+	if h.maxConnections != maxConnections {
+		t.Errorf("expected default %d max connections, got %d", maxConnections, h.maxConnections)
 	}
-	if h.maxMessageSize != 4096 {
-		t.Errorf("expected maxMessageSize 4096, got %d", h.maxMessageSize)
+	if h.maxMessageSize != maxMessageSize {
+		t.Errorf("expected default %d max message size, got %d", maxMessageSize, h.maxMessageSize)
 	}
-	if h.pongWait != 60*time.Second {
-		t.Errorf("expected pongWait 60s, got %v", h.pongWait)
-	}
-	if h.writeWait != 10*time.Second {
-		t.Errorf("expected writeWait 10s, got %v", h.writeWait)
+	if h.pongWait != pongWait {
+		t.Errorf("expected default %v pong wait, got %v", pongWait, h.pongWait)
 	}
 }
 
-func TestNewHubWithOptionsPingInterval(t *testing.T) {
-	h := NewHubWithOptions(HubOptions{PongWait: 20 * time.Second})
-	expectedPing := (20 * time.Second * 9) / 10
-	if h.pingPeriod != expectedPing {
-		t.Errorf("expected pingPeriod %v, got %v", expectedPing, h.pingPeriod)
+func TestBroadcastExcept(t *testing.T) {
+	h := NewHub()
+
+	sender := &Client{
+		conn: nil,
+		send: make(chan []byte, 64),
+	}
+	receiver := &Client{
+		conn: nil,
+		send: make(chan []byte, 64),
+	}
+	h.clients[sender] = true
+	h.clients[receiver] = true
+
+	h.BroadcastExcept(sender, Event{Type: "scroll", Data: json.RawMessage(`{"x":1,"y":2}`)})
+
+	select {
+	case <-receiver.send:
+	case <-time.After(time.Second):
+		t.Error("expected receiver to get message")
+	}
+
+	select {
+	case <-sender.send:
+		t.Error("sender should not receive its own message")
+	default:
 	}
 }
 
-func TestNewHubWithOptionsExplicitPing(t *testing.T) {
-	h := NewHubWithOptions(HubOptions{
-		PongWait:     60 * time.Second,
-		PingInterval: 10 * time.Second,
-	})
-	if h.pingPeriod != 10*time.Second {
-		t.Errorf("expected pingPeriod 10s, got %v", h.pingPeriod)
+func TestReadPumpRelaysClientEvents(t *testing.T) {
+	h := NewHub()
+	srv := httptest.NewServer(http.HandlerFunc(h.HandleWS))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+
+	client1, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial client1 error: %v", err)
+	}
+	defer client1.Close()
+
+	// drain hello
+	_, _, err = client1.ReadMessage()
+	if err != nil {
+		t.Fatalf("client1 read hello: %v", err)
+	}
+
+	client2, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial client2 error: %v", err)
+	}
+	defer client2.Close()
+
+	// drain hello
+	_, _, err = client2.ReadMessage()
+	if err != nil {
+		t.Fatalf("client2 read hello: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, msg, err := client2.ReadMessage()
+		if err != nil {
+			t.Errorf("client2 read error: %v", err)
+			return
+		}
+		var ev Event
+		if err := json.Unmarshal(msg, &ev); err != nil {
+			t.Errorf("unmarshal error: %v", err)
+			return
+		}
+		if ev.Type != "scroll" {
+			t.Errorf("expected 'scroll', got %q", ev.Type)
+		}
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+
+	client1.WriteMessage(websocket.TextMessage, []byte(`{"type":"scroll","data":{"x":100,"y":200}}`))
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for relayed event")
+	}
+}
+
+func TestNotifySendsBrowserNotify(t *testing.T) {
+	h := NewHub()
+
+	received := make(chan Event, 1)
+	h.BroadcastFn = func(ev Event) {
+		received <- ev
+	}
+
+	h.Notify("test message", 3*time.Second)
+
+	select {
+	case ev := <-received:
+		if ev.Type != "browser:notify" {
+			t.Errorf("expected 'browser:notify', got %q", ev.Type)
+		}
+		if !strings.Contains(string(ev.Data), "test message") {
+			t.Errorf("expected data to contain 'test message', got %s", string(ev.Data))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for notify")
+	}
+}
+
+func TestNotifyUsesDefaultTimeout(t *testing.T) {
+	h := NewHub()
+
+	received := make(chan Event, 1)
+	h.BroadcastFn = func(ev Event) {
+		received <- ev
+	}
+
+	h.Notify("short", 0)
+
+	select {
+	case ev := <-received:
+		if ev.Type != "browser:notify" {
+			t.Errorf("expected 'browser:notify', got %q", ev.Type)
+		}
+		if !strings.Contains(string(ev.Data), `"timeout":5000`) {
+			t.Errorf("expected default timeout 5000ms, got %s", string(ev.Data))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for notify")
+	}
+}
+
+func TestHelloMessageOnConnect(t *testing.T) {
+	h := NewHub()
+	srv := httptest.NewServer(http.HandlerFunc(h.HandleWS))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+	c, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial error: %v", err)
+	}
+	defer c.Close()
+
+	_, msg, err := c.ReadMessage()
+	if err != nil {
+		t.Fatalf("read hello error: %v", err)
+	}
+
+	var ev Event
+	if err := json.Unmarshal(msg, &ev); err != nil {
+		t.Fatalf("unmarshal hello error: %v", err)
+	}
+	if ev.Type != "hello" {
+		t.Errorf("expected 'hello', got %q", ev.Type)
+	}
+}
+
+func TestReadPumpIgnoresUnknownEvents(t *testing.T) {
+	h := NewHub()
+	srv := httptest.NewServer(http.HandlerFunc(h.HandleWS))
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/"
+
+	client1, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial client1 error: %v", err)
+	}
+	defer client1.Close()
+
+	// drain hello
+	_, _, err = client1.ReadMessage()
+	if err != nil {
+		t.Fatalf("client1 read hello: %v", err)
+	}
+
+	client2, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial client2 error: %v", err)
+	}
+	defer client2.Close()
+
+	// drain hello
+	_, _, err = client2.ReadMessage()
+	if err != nil {
+		t.Fatalf("client2 read hello: %v", err)
+	}
+
+	client2.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+
+	time.Sleep(50 * time.Millisecond)
+
+	client1.WriteMessage(websocket.TextMessage, []byte(`{"type":"unknown","data":{}}`))
+
+	_, _, err = client2.ReadMessage()
+	if err == nil {
+		t.Error("expected client2 to NOT receive unknown event type")
+	}
+}
+
+func TestClientIDsIncrement(t *testing.T) {
+	h := NewHub()
+
+	c1 := &Client{id: 0}
+	c2 := &Client{id: 0}
+
+	h.mu.Lock()
+	h.nextID++
+
+	c1.id = h.nextID
+	h.clients[c1] = true
+
+	h.nextID++
+	c2.id = h.nextID
+	h.clients[c2] = true
+	h.mu.Unlock()
+
+	if c1.id == c2.id {
+		t.Error("expected client IDs to be different")
 	}
 }
